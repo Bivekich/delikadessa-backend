@@ -6,8 +6,18 @@ const crypto = require('crypto');
 const { createPayment, checkPaymentStatus } = require('./utils/payment');
 const { sendToTelegramNotification } = require('./utils/telegram');
 
-// Load environment variables from parent directory
+// Load environment variables from parent directory or directly from delikadessa directory
 dotenv.config({ path: path.join(__dirname, '../.env') });
+// Try alternative path if first one failed
+if (!process.env.TELEGRAM_BOT_TOKEN) {
+  console.log('Trying alternative env file path...');
+  dotenv.config({ path: path.join(__dirname, '../delikadessa/.env') });
+}
+
+// Print Telegram credentials to verify
+console.log('=== CHECKING TELEGRAM CREDENTIALS ===');
+console.log('TELEGRAM_BOT_TOKEN exists:', !!process.env.TELEGRAM_BOT_TOKEN);
+console.log('TELEGRAM_CHAT_ID:', process.env.TELEGRAM_CHAT_ID);
 
 const app = express();
 
@@ -22,9 +32,14 @@ const pendingBookings = new Map();
 const activePolls = new Map();
 
 // Function to poll payment status
-const pollPaymentStatus = async (paymentId, bookingData, maxAttempts = 1440) => { // 1440 attempts * 60 seconds = 24 hours
+const pollPaymentStatus = async (
+  paymentId,
+  bookingData,
+  maxAttempts = 1440
+) => {
+  // 1440 attempts * 60 seconds = 24 hours
   let attempts = 0;
-  
+
   // Check if we're already polling this payment
   if (activePolls.has(paymentId)) {
     console.log(`Already polling payment ${paymentId}`);
@@ -37,49 +52,60 @@ const pollPaymentStatus = async (paymentId, bookingData, maxAttempts = 1440) => 
       const minutesElapsed = attempts;
       const hoursElapsed = Math.floor(minutesElapsed / 60);
       const remainingMinutes = minutesElapsed % 60;
-      const timeElapsed = hoursElapsed > 0 
-        ? `${hoursElapsed}h ${remainingMinutes}m`
-        : `${remainingMinutes}m`;
+      const timeElapsed =
+        hoursElapsed > 0
+          ? `${hoursElapsed}h ${remainingMinutes}m`
+          : `${remainingMinutes}m`;
 
-      console.log(`Polling payment status for ${paymentId}, attempt ${attempts + 1} (${timeElapsed} elapsed)`);
+      console.log(
+        `Polling payment status for ${paymentId}, attempt ${
+          attempts + 1
+        } (${timeElapsed} elapsed)`
+      );
       const status = await checkPaymentStatus(paymentId);
-      
+
       switch (status.status) {
         case 'succeeded':
-          console.log(`Payment ${paymentId} succeeded after ${timeElapsed}, sending notification`);
+          console.log(
+            `Payment ${paymentId} succeeded after ${timeElapsed}, sending notification`
+          );
           await sendToTelegramNotification({
             ...bookingData,
             paymentId,
-            paymentStatus: 'Оплачено'
+            paymentStatus: 'Оплачено',
           });
           pendingBookings.delete(paymentId);
           activePolls.delete(paymentId);
           return;
-          
+
         case 'canceled':
-          console.log(`Payment ${paymentId} canceled after ${timeElapsed}, sending notification`);
+          console.log(
+            `Payment ${paymentId} canceled after ${timeElapsed}, sending notification`
+          );
           await sendToTelegramNotification({
             ...bookingData,
             paymentId,
-            paymentStatus: 'Отменено'
+            paymentStatus: 'Отменено',
           });
           pendingBookings.delete(paymentId);
           activePolls.delete(paymentId);
           return;
-          
+
         case 'pending':
           attempts++;
           if (attempts < maxAttempts) {
             // Continue polling after 1 minute
             setTimeout(poll, 60000);
           } else {
-            console.log(`Max polling attempts reached for payment ${paymentId} after 24 hours`);
+            console.log(
+              `Max polling attempts reached for payment ${paymentId} after 24 hours`
+            );
             // Send notification about payment still pending after 24 hours
             try {
               await sendToTelegramNotification({
                 ...bookingData,
                 paymentId,
-                paymentStatus: 'Ожидает оплаты более 24 часов'
+                paymentStatus: 'Ожидает оплаты более 24 часов',
               });
             } catch (error) {
               console.error('Failed to send timeout notification:', error);
@@ -87,7 +113,7 @@ const pollPaymentStatus = async (paymentId, bookingData, maxAttempts = 1440) => 
             activePolls.delete(paymentId);
           }
           break;
-          
+
         default:
           console.log(`Unhandled payment status: ${status.status}`);
           activePolls.delete(paymentId);
@@ -99,12 +125,14 @@ const pollPaymentStatus = async (paymentId, bookingData, maxAttempts = 1440) => 
         // Retry after 1 minute on error
         setTimeout(poll, 60000);
       } else {
-        console.log(`Stopped polling for payment ${paymentId} after 24 hours due to errors`);
+        console.log(
+          `Stopped polling for payment ${paymentId} after 24 hours due to errors`
+        );
         try {
           await sendToTelegramNotification({
             ...bookingData,
             paymentId,
-            paymentStatus: 'Ошибка проверки статуса после 24 часов'
+            paymentStatus: 'Ошибка проверки статуса после 24 часов',
           });
         } catch (notifyError) {
           console.error('Failed to send error notification:', notifyError);
@@ -124,7 +152,7 @@ app.post('/api/webhook/payment', async (req, res) => {
   console.log('=== Webhook Request ===');
   console.log('Headers:', req.headers);
   console.log('Raw Body:', req.body.toString());
-  
+
   try {
     // Parse the raw body
     const notification = JSON.parse(req.body.toString());
@@ -141,7 +169,7 @@ app.post('/api/webhook/payment', async (req, res) => {
     // Try to get booking data from both sources
     const storedBookingData = pendingBookings.get(paymentId);
     const metadataBookingData = object.metadata;
-    
+
     console.log('Stored booking data:', storedBookingData);
     console.log('Metadata booking data:', metadataBookingData);
 
@@ -166,7 +194,7 @@ app.post('/api/webhook/payment', async (req, res) => {
           await sendToTelegramNotification({
             ...bookingData,
             paymentId,
-            paymentStatus: 'Оплачено'
+            paymentStatus: 'Оплачено',
           });
           console.log('Successfully sent Telegram notification');
           pendingBookings.delete(paymentId);
@@ -181,7 +209,7 @@ app.post('/api/webhook/payment', async (req, res) => {
           await sendToTelegramNotification({
             ...bookingData,
             paymentId,
-            paymentStatus: 'Ожидает подтверждения'
+            paymentStatus: 'Ожидает подтверждения',
           });
           console.log('Successfully sent waiting for capture notification');
         } catch (error) {
@@ -195,7 +223,7 @@ app.post('/api/webhook/payment', async (req, res) => {
           await sendToTelegramNotification({
             ...bookingData,
             paymentId,
-            paymentStatus: 'Отменено'
+            paymentStatus: 'Отменено',
           });
           console.log('Successfully sent cancellation notification');
           pendingBookings.delete(paymentId);
@@ -223,20 +251,22 @@ app.post('/api/create-payment', async (req, res) => {
     const { bookingData } = req.body;
     console.log('=== Creating Payment ===');
     console.log('Booking data:', bookingData);
-    
+
     const payment = await createPayment(bookingData);
     console.log('Payment created:', payment);
-    
+
     // Store booking data
     pendingBookings.set(payment.id, bookingData);
-    
+
     // Start polling payment status
     pollPaymentStatus(payment.id, bookingData);
-    
+
     res.json(payment);
   } catch (error) {
     console.error('Payment creation error:', error);
-    res.status(500).json({ error: error.message || 'Не удалось создать платеж' });
+    res
+      .status(500)
+      .json({ error: error.message || 'Не удалось создать платеж' });
   }
 });
 
@@ -247,7 +277,7 @@ app.get('/api/check-payment/:paymentId', async (req, res) => {
     console.log('=== Checking Payment Status ===');
     console.log('Payment ID:', paymentId);
     console.log('Current pendingBookings:', [...pendingBookings.entries()]);
-    
+
     const status = await checkPaymentStatus(paymentId);
     console.log('Payment status:', status);
 
@@ -260,7 +290,7 @@ app.get('/api/check-payment/:paymentId', async (req, res) => {
           await sendToTelegramNotification({
             ...bookingData,
             paymentId,
-            paymentStatus: 'Оплачено'
+            paymentStatus: 'Оплачено',
           });
           console.log('Successfully sent backup notification');
           pendingBookings.delete(paymentId);
@@ -273,7 +303,9 @@ app.get('/api/check-payment/:paymentId', async (req, res) => {
     res.json(status);
   } catch (error) {
     console.error('Payment status check error:', error);
-    res.status(500).json({ error: error.message || 'Не удалось проверить статус платежа' });
+    res
+      .status(500)
+      .json({ error: error.message || 'Не удалось проверить статус платежа' });
   }
 });
 
@@ -282,7 +314,20 @@ app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
   console.log('Environment variables:');
   console.log('BACKEND_URL:', process.env.BACKEND_URL);
-  console.log('SHOP_ID:', process.env.SHOP_ID);
-  console.log('TELEGRAM_BOT_TOKEN:', process.env.TELEGRAM_BOT_TOKEN ? 'Set' : 'Not set');
+  console.log('SHOP_ID:', process.env.SHOP_ID ? 'Set' : 'Not set');
+  console.log(
+    'KASSA_SECRET_KEY:',
+    process.env.KASSA_SECRET_KEY ? 'Set' : 'Not set'
+  );
+  console.log(
+    'TELEGRAM_BOT_TOKEN:',
+    process.env.TELEGRAM_BOT_TOKEN ? 'Set' : 'Not set'
+  );
   console.log('TELEGRAM_CHAT_ID:', process.env.TELEGRAM_CHAT_ID);
-}); 
+
+  // Check if Telegram credentials are valid
+  if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID) {
+    console.error('WARNING: Telegram credentials are missing or invalid.');
+    console.error('Notifications will not be sent to Telegram.');
+  }
+});

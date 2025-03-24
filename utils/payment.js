@@ -2,6 +2,20 @@ const fetch = require('node-fetch');
 
 const YOOKASSA_API_URL = 'https://api.yookassa.ru/v3';
 
+// Функция для расчета стоимости в зависимости от количества гостей
+const calculatePrice = (guests) => {
+  // Извлекаем только число из строки (например, "5 человек" -> 5)
+  const guestCount = parseInt(guests);
+
+  if (guestCount <= 2) return 3000;
+  if (guestCount <= 4) return 6000;
+  if (guestCount <= 8) return 9000;
+  if (guestCount <= 12) return 12000;
+
+  // Если что-то пошло не так, возвращаем базовую цену
+  return 3000;
+};
+
 const createPayment = async (bookingData) => {
   const shopId = process.env.SHOP_ID;
   const secretKey = process.env.KASSA_SECRET_KEY;
@@ -11,38 +25,45 @@ const createPayment = async (bookingData) => {
   }
 
   // Create a unique idempotency key
-  const idempotenceKey = `booking_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const idempotenceKey = `booking_${Date.now()}_${Math.random()
+    .toString(36)
+    .substr(2, 9)}`;
+
+  // Рассчитываем стоимость в зависимости от количества гостей
+  const price = calculatePrice(bookingData.guests).toFixed(2);
 
   const paymentData = {
     amount: {
-      value: '3000.00',
-      currency: 'RUB'
+      value: price,
+      currency: 'RUB',
     },
     capture: true,
     confirmation: {
       type: 'redirect',
-      return_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/success`,
-      locale: 'ru_RU'
+      return_url: `${
+        process.env.FRONTEND_URL || 'http://localhost:5173'
+      }/success`,
+      locale: 'ru_RU',
     },
     description: `Бронирование столика на ${bookingData.date} ${bookingData.time}`,
     receipt: {
       customer: {
         email: bookingData.email,
-        phone: bookingData.phone
+        phone: bookingData.phone,
       },
       items: [
         {
           description: 'Депозит за бронирование столика',
           quantity: '1',
           amount: {
-            value: '3000.00',
-            currency: 'RUB'
+            value: price,
+            currency: 'RUB',
           },
           vat_code: 1,
           payment_mode: 'full_prepayment',
-          payment_subject: 'service'
-        }
-      ]
+          payment_subject: 'service',
+        },
+      ],
     },
     metadata: {
       booking_id: idempotenceKey,
@@ -53,8 +74,8 @@ const createPayment = async (bookingData) => {
       customer_name: `${bookingData.firstName} ${bookingData.lastName}`,
       guests: bookingData.guests,
       firstName: bookingData.firstName,
-      lastName: bookingData.lastName
-    }
+      lastName: bookingData.lastName,
+    },
   };
 
   try {
@@ -65,9 +86,9 @@ const createPayment = async (bookingData) => {
       headers: {
         'Content-Type': 'application/json',
         'Idempotence-Key': idempotenceKey,
-        'Authorization': `Basic ${auth}`
+        Authorization: `Basic ${auth}`,
       },
-      body: JSON.stringify(paymentData)
+      body: JSON.stringify(paymentData),
     });
 
     const responseData = await response.json();
@@ -99,15 +120,17 @@ const checkPaymentStatus = async (paymentId) => {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Basic ${auth}`
-      }
+        Authorization: `Basic ${auth}`,
+      },
     });
 
     const responseData = await response.json();
 
     if (!response.ok) {
       console.error('Payment status check error response:', responseData);
-      throw new Error(responseData.description || 'Payment status check failed');
+      throw new Error(
+        responseData.description || 'Payment status check failed'
+      );
     }
 
     return responseData;
@@ -119,5 +142,5 @@ const checkPaymentStatus = async (paymentId) => {
 
 module.exports = {
   createPayment,
-  checkPaymentStatus
-}; 
+  checkPaymentStatus,
+};
